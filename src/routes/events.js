@@ -70,44 +70,48 @@ router.post('/:eventId/register', async (req, res) => {
     // Lógica principal basada en la existencia y estado del registro
     if (existingRows.length > 0) {
       const registration = existingRows[0];
-
+ 
       if (registration.status === 'confirmed') {
         // CASO 1: El usuario ya está confirmado. No hacer nada, solo notificar.
-        await connection.commit(); // Terminar la transacción, aunque no se hicieron cambios.
+        await connection.commit();
         return res.status(409).json({ message: 'Ya estás inscrito y tu pago ha sido confirmado.', code: 'ALREADY_CONFIRMED' });
       }
-
-      // CASO 2: El usuario está pendiente o cancelado. Actualizamos sus datos y reactivamos.
+ 
+      // CASO 2: El usuario está 'pending_payment' o 'cancelled'.
+      // Si estaba cancelado, debemos verificar si hay cupo para reactivarlo.
+      if (registration.status === 'cancelled' && registeredCount >= maxCapacity) {
+        throw { status: 409, message: 'Lo sentimos, los cupos se han agotado mientras tu registro estaba inactivo.' };
+      }
+ 
       const updateSql = `
         UPDATE registrations 
         SET full_name = ?, phone = ?, profession = ?, position = ?, is_entrepreneur = ?, sector = ?, status = 'pending_payment', updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `;
       await connection.query(updateSql, [fullName, phone, profession, position, isEntrepreneur, sector, registration.id]);
-      
+ 
       await connection.commit();
+ 
       if (registration.status === 'pending_payment') {
         return res.status(200).json({ message: 'Hemos actualizado tu reserva pendiente de pago. Revisa tu correo para ver las instrucciones.', code: 'PENDING_PAYMENT' });
-      } else { // era 'cancelled'
+      } else { // El estado original era 'cancelled'
         return res.status(201).json({ message: '¡Qué bueno tenerte de vuelta! Tu registro ha sido reactivado. Revisa tu correo.', code: 'REGISTRATION_SUCCESS' });
       }
-
     } else {
       // CASO 3: Es un registro completamente nuevo.
       if (registeredCount >= maxCapacity) {
         throw { status: 409, message: 'Lo sentimos, todos los cupos para este evento han sido tomados.' };
       }
-
+ 
       const insertSql = `
         INSERT INTO registrations (event_id, full_name, email, phone, profession, position, is_entrepreneur, sector)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `;
       await connection.query(insertSql, [eventId, fullName, email, phone, profession, position, isEntrepreneur, sector]);
-      
+ 
       await connection.commit();
       return res.status(201).json({ message: '¡Registro exitoso! Hemos enviado las instrucciones de pago a tu correo.', code: 'REGISTRATION_SUCCESS' });
     }
-
   } catch (error) {
     await connection.rollback(); // Revertir transacción en caso de error
     console.error('Error al registrar asistente:', error.message || error);
