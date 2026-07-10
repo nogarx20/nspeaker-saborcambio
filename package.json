@@ -1,32 +1,16 @@
 {
-  "name": "inspeaker-monorepo",
-  "private": true,
+  "name": "inspeaker-backend",
   "version": "1.0.0",
+  "description": "Backend para el evento El Sabor del Cambio",
+  "main": "src/server.js",
   "type": "module",
   "scripts": {
-    "dev": "vite --port=3000",
-    "start": "node backend/src/server.js",
-    "build": "npm run build:frontend && npm run build:backend",
-    "build:frontend": "vite build",
-    "build:backend": "echo 'Backend build not needed, dependencies will be installed.'",
-    "install:frontend": "npm install",
-    "install:backend": "npm install --prefix backend"
+    "start": "node src/server.js"
   },
   "dependencies": {
-    "@google/genai": "^2.4.0",
-    "@tailwindcss/vite": "^4.1.14",
-    "@vitejs/plugin-react": "^5.0.4",
-    "lucide-react": "^0.546.0",
-    "motion": "^12.23.24",
-    "react": "^19.2.7",
-    "react-dom": "^19.0.1",
-    "vite": "^6.2.3"
-  },
-  "devDependencies": {
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
-    "autoprefixer": "^10.4.21",
-    "tailwindcss": "^4.1.14",
-    "typescript": "~5.8.2"
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "mysql2": "^3.10.1"
   }
 }
