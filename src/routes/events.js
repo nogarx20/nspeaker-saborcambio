@@ -73,13 +73,15 @@ router.post('/:eventId/register', async (req, res) => {
  
       if (registration.status === 'confirmed') {
         // CASO 1: El usuario ya está confirmado. No hacer nada, solo notificar.
-        await connection.commit();
+        // No hay cambios que guardar, así que revertimos la transacción para liberar el bloqueo.
+        await connection.rollback();
         return res.status(409).json({ message: 'Ya estás inscrito y tu pago ha sido confirmado.', code: 'ALREADY_CONFIRMED' });
       }
  
       // CASO 2: El usuario está 'pending_payment' o 'cancelled'.
       // Si estaba cancelado, debemos verificar si hay cupo para reactivarlo.
       if (registration.status === 'cancelled' && registeredCount >= maxCapacity) {
+        await connection.rollback(); // Revertir para liberar el bloqueo antes de lanzar el error.
         throw { status: 409, message: 'Lo sentimos, los cupos se han agotado mientras tu registro estaba inactivo.' };
       }
  
@@ -100,6 +102,7 @@ router.post('/:eventId/register', async (req, res) => {
     } else {
       // CASO 3: Es un registro completamente nuevo.
       if (registeredCount >= maxCapacity) {
+        await connection.rollback(); // Revertir para liberar el bloqueo antes de lanzar el error.
         throw { status: 409, message: 'Lo sentimos, todos los cupos para este evento han sido tomados.' };
       }
  
