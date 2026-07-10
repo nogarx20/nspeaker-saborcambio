@@ -63,7 +63,7 @@ router.post('/:eventId/register', async (req, res) => {
 
     // --- MODIFICACIÓN TEMPORAL PARA PRUEBAS ---
     // Descomenta la siguiente línea para forzar el escenario de "evento lleno".
-    const isFull = true;
+    // const isFull = true;
     // 2. Verificar si el email ya está registrado para este evento
     const [existingRows] = await connection.query(
       'SELECT id, status FROM registrations WHERE event_id = ? AND email = ?',
@@ -88,7 +88,7 @@ router.post('/:eventId/register', async (req, res) => {
  
       // CASO 2: El usuario está 'pending_payment' o 'cancelled'.
       // Si estaba cancelado, debemos verificar si hay cupo para reactivarlo.
-      if (registeredCount >= maxCapacity || isFull) { // Usamos la variable de prueba
+      if (registeredCount >= maxCapacity /*|| isFull*/) { // La variable de prueba se puede eliminar o mantener comentada
         // Si está lleno, actualizamos y lo ponemos en lista de espera
         const updateSql = `
           UPDATE registrations 
@@ -119,7 +119,7 @@ router.post('/:eventId/register', async (req, res) => {
       }
     } else {
       // CASO 3: Es un registro completamente nuevo.
-      if (registeredCount >= maxCapacity || isFull) { // Usamos la variable de prueba
+      if (registeredCount >= maxCapacity /*|| isFull*/) { // La variable de prueba se puede eliminar o mantener comentada
         // Si está lleno, lo añadimos a la lista de espera
         const insertSql = `
           INSERT INTO registrations (event_id, full_name, email, phone, profession, position, is_entrepreneur, sector, status)
