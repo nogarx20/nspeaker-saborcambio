@@ -61,6 +61,9 @@ router.post('/:eventId/register', async (req, res) => {
     const maxCapacity = eventRows[0].max_capacity;
     const registeredCount = registrationRows[0].registered_count;
 
+    // --- MODIFICACIÓN TEMPORAL PARA PRUEBAS ---
+    // Descomenta la siguiente línea para forzar el escenario de "evento lleno".
+    // const isFull = true;
     // 2. Verificar si el email ya está registrado para este evento
     const [existingRows] = await connection.query(
       'SELECT id, status FROM registrations WHERE event_id = ? AND email = ?',
@@ -77,12 +80,27 @@ router.post('/:eventId/register', async (req, res) => {
         await connection.rollback();
         return res.status(409).json({ message: 'Ya estás inscrito y tu pago ha sido confirmado.', code: 'ALREADY_CONFIRMED' });
       }
+
+      if (registration.status === 'waitlist') {
+        await connection.rollback();
+        return res.status(409).json({ message: 'Ya estás en nuestra lista de espera. Te contactaremos si se libera un cupo.', code: 'ALREADY_IN_WAITLIST' });
+      }
  
       // CASO 2: El usuario está 'pending_payment' o 'cancelled'.
       // Si estaba cancelado, debemos verificar si hay cupo para reactivarlo.
-      if (registration.status === 'cancelled' && registeredCount >= maxCapacity) {
-        await connection.rollback(); // Revertir para liberar el bloqueo antes de lanzar el error.
-        throw { status: 409, message: 'Lo sentimos, los cupos se han agotado mientras tu registro estaba inactivo.' };
+      if (registeredCount >= maxCapacity /*|| isFull*/) { // Usamos la variable de prueba
+        // Si está lleno, actualizamos y lo ponemos en lista de espera
+        const updateSql = `
+          UPDATE registrations 
+          SET full_name = ?, phone = ?, profession = ?, position = ?, is_entrepreneur = ?, sector = ?, status = 'waitlist', updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `;
+        await connection.query(updateSql, [fullName, phone, profession, position, isEntrepreneur, sector, registration.id]);
+        await connection.commit();
+        return res.status(200).json({ 
+          message: 'El evento está lleno, pero hemos guardado tus datos en nuestra lista de espera. ¡Te avisaremos si se libera un cupo!', 
+          code: 'WAITLIST_SUCCESS' 
+        });
       }
  
       const updateSql = `
@@ -101,9 +119,18 @@ router.post('/:eventId/register', async (req, res) => {
       }
     } else {
       // CASO 3: Es un registro completamente nuevo.
-      if (registeredCount >= maxCapacity) {
-        await connection.rollback(); // Revertir para liberar el bloqueo antes de lanzar el error.
-        throw { status: 409, message: 'Lo sentimos, todos los cupos para este evento han sido tomados.' };
+      if (registeredCount >= maxCapacity /*|| isFull*/) { // Usamos la variable de prueba
+        // Si está lleno, lo añadimos a la lista de espera
+        const insertSql = `
+          INSERT INTO registrations (event_id, full_name, email, phone, profession, position, is_entrepreneur, sector, status)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'waitlist')
+        `;
+        await connection.query(insertSql, [eventId, fullName, email, phone, profession, position, isEntrepreneur, sector]);
+        await connection.commit();
+        return res.status(200).json({ 
+          message: 'El evento está lleno, pero te hemos añadido a la lista de espera. ¡Te avisaremos si se libera un cupo!', 
+          code: 'WAITLIST_SUCCESS' 
+        });
       }
  
       const insertSql = `
