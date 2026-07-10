@@ -49,20 +49,76 @@ router.post('/:eventId/register', async (req, res) => {
     return res.status(400).json({ message: 'Nombre completo, email y teléfono son requeridos.' });
   }
 
+  const connection = await pool.getConnection();
+
   try {
-    const sql = `
-      INSERT INTO registrations (event_id, full_name, email, phone, profession, position, is_entrepreneur, sector)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `;
-    await pool.query(sql, [eventId, fullName, email, phone, profession, position, isEntrepreneur, sector]);
-    res.status(201).json({ message: '¡Registro exitoso! Tienes 24h para confirmar el pago.' });
-  } catch (error) {
-    console.error('Error al registrar asistente:', error);
-    // Manejar error de email duplicado
-    if (error.code === 'ER_DUP_ENTRY') {
-      return res.status(409).json({ message: 'Este correo electrónico ya ha sido registrado para este evento.' });
+    await connection.beginTransaction();
+
+    // 1. Verificar si hay cupos disponibles (con bloqueo para concurrencia)
+    const [eventRows] = await connection.query('SELECT max_capacity FROM events WHERE id = ? FOR UPDATE', [eventId]);
+    const [registrationRows] = await connection.query("SELECT COUNT(id) as registered_count FROM registrations WHERE event_id = ? AND status IN ('pending_payment', 'confirmed')", [eventId]);
+    
+    const maxCapacity = eventRows[0].max_capacity;
+    const registeredCount = registrationRows[0].registered_count;
+
+    // 2. Verificar si el email ya está registrado para este evento
+    const [existingRows] = await connection.query(
+      'SELECT id, status FROM registrations WHERE event_id = ? AND email = ?',
+      [eventId, email]
+    );
+
+    // Lógica principal basada en la existencia y estado del registro
+    if (existingRows.length > 0) {
+      const registration = existingRows[0];
+
+      if (registration.status === 'confirmed') {
+        // CASO 1: El usuario ya está confirmado. No hacer nada, solo notificar.
+        await connection.commit(); // Terminar la transacción, aunque no se hicieron cambios.
+        return res.status(409).json({ message: 'Ya estás inscrito y tu pago ha sido confirmado.', code: 'ALREADY_CONFIRMED' });
+      }
+
+      // CASO 2: El usuario está pendiente o cancelado. Actualizamos sus datos y reactivamos.
+      const updateSql = `
+        UPDATE registrations 
+        SET full_name = ?, phone = ?, profession = ?, position = ?, is_entrepreneur = ?, sector = ?, status = 'pending_payment', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `;
+      await connection.query(updateSql, [fullName, phone, profession, position, isEntrepreneur, sector, registration.id]);
+      
+      await connection.commit();
+      if (registration.status === 'pending_payment') {
+        return res.status(200).json({ message: 'Hemos actualizado tu reserva pendiente de pago. Revisa tu correo para ver las instrucciones.', code: 'PENDING_PAYMENT' });
+      } else { // era 'cancelled'
+        return res.status(201).json({ message: '¡Qué bueno tenerte de vuelta! Tu registro ha sido reactivado. Revisa tu correo.', code: 'REGISTRATION_SUCCESS' });
+      }
+
+    } else {
+      // CASO 3: Es un registro completamente nuevo.
+      if (registeredCount >= maxCapacity) {
+        throw { status: 409, message: 'Lo sentimos, todos los cupos para este evento han sido tomados.' };
+      }
+
+      const insertSql = `
+        INSERT INTO registrations (event_id, full_name, email, phone, profession, position, is_entrepreneur, sector)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+      await connection.query(insertSql, [eventId, fullName, email, phone, profession, position, isEntrepreneur, sector]);
+      
+      await connection.commit();
+      return res.status(201).json({ message: '¡Registro exitoso! Hemos enviado las instrucciones de pago a tu correo.', code: 'REGISTRATION_SUCCESS' });
     }
-    res.status(500).json({ message: 'Error interno del servidor.' });
+
+  } catch (error) {
+    await connection.rollback(); // Revertir transacción en caso de error
+    console.error('Error al registrar asistente:', error.message || error);
+
+    if (error.status) {
+      res.status(error.status).json({ message: error.message });
+    } else {
+      res.status(500).json({ message: 'Error interno del servidor.' });
+    }
+  } finally {
+    if (connection) connection.release();
   }
 });
 
